@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Utah HS MTB Racing Analytics</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    const NEBO_GOATS_TEAMS = ['Maple Mountain', 'Salem Hills', 'Payson', 'Spanish Fork', 'Springville'];
+
+    // Helper function to parse category level
+    const getCategoryLevel = (category) => {
+      const cat = category.toLowerCase();
+      if (cat.includes('beginner')) return 'Beginner';
+      if (cat.includes('intermediate')) return 'Intermediate';
+      if (cat.includes('advanced')) return 'Advanced';
+      if (cat.includes('slr')) return 'SLR';
+      if (cat.includes('freshman')) return 'Freshman';
+      if (cat.includes('jv')) return 'JV';
+      if (cat.includes('varsity')) return 'Varsity';
+      return 'Other';
+    };
+
+    // Helper function to get gender from category
+    const getGender = (category) => {
+      return category.includes('Girls') ? 'Female' : 'Male';
+    };
+
+    // Collapsible Section component - defined outside App to prevent re-creation on render
+    const CollapsibleSection = ({ id, title, icon, isOpen, onToggle, children }) => (
+      <div className="bg-white rounded-lg shadow mb-4 overflow-hidden">
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(id); }}
+          className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition"
+        >
+          <span className="font-bold text-gray-800">{icon} {title}</span>
+          <svg 
+            className={`w-5 h-5 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {isOpen && <div className="p-4">{children}</div>}
+      </div>
+    );
+
+    function App() {
+      const [raceData, setRaceData] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      
+      // Page navigation
+      const [activePage, setActivePage] = useState('individuals');
+      
+      // Team page state
+      const [raceFilter, setRaceFilter] = useState('all');
+      const [sortColumn, setSortColumn] = useState('totalRacers');
+      const [sortDirection, setSortDirection] = useState('desc');
+      const [selectedTeams, setSelectedTeams] = useState([]);
+      const [showOnlyNeboGoats, setShowOnlyNeboGoats] = useState(false);
+      
+      // Team Category Analysis state
+      const [analysisTeam, setAnalysisTeam] = useState('');
+      const [analysisCategory, setAnalysisCategory] = useState('');
+      const [analysisRace, setAnalysisRace] = useState('all');
+      
+      // Individual page state
+      const [selectedRider, setSelectedRider] = useState('');
+      const [searchTerm, setSearchTerm] = useState('');
+      const [showDropdown, setShowDropdown] = useState(false);
+      
+      // Region filter state
+      const [selectedRegions, setSelectedRegions] = useState([5]);
+      const [regionDropdownOpen, setRegionDropdownOpen] = useState(false);
+      const regionDropdownRef = useRef(null);
+      
+      // Team dropdown state
+      const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
+      const teamDropdownRef = useRef(null);
+      
+      // Collapsible sections state
+      const [sectionsOpen, setSectionsOpen] = useState({
+        teamComparison: true,
+        categoryLeaderboard: false,
+        genderBalance: false,
+        programFunnel: false,
+        categoryAnalysis: false
+      });
+      
+      // Category Leaderboard state
+      const [leaderboardCategory, setLeaderboardCategory] = useState('');
+      const [leaderboardSearch, setLeaderboardSearch] = useState('');
+      const leaderboardTableRef = useRef(null);
+      const highlightedRowRef = useRef(null);
+      
+      // Close region dropdown when clicking outside
+      useEffect(() => {
+        const handleClickOutside = (event) => {
+          if (regionDropdownRef.current && !regionDropdownRef.current.contains(event.target)) {
+            setRegionDropdownOpen(false);
+          }
+          if (teamDropdownRef.current && !teamDropdownRef.current.contains(event.target)) {
+            setTeamDropdownOpen(false);
+          }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+      }, []);
+
+      // Load race data
+      useEffect(() => {
+        fetch('race_data_all.json')
+          .then(response => {
+            if (!response.ok) throw new Error('Failed to load data');
+            return response.json();
+          })
+          .then(data => {
+            setRaceData(data);
+            // Set first rider from default region (5) as default
+            if (data.length > 0) {
+              const region5Data = data.filter(d => d.Region === 5);
+              const firstRider = region5Data.length > 0
+                ? [...new Set(region5Data.map(d => d.Name))].sort()[0]
+                : [...new Set(data.map(d => d.Name))].sort()[0];
+              setSelectedRider(firstRider);
+            }
+            setLoading(false);
+          })
+          .catch(err => {
+            setError(err.message);
+            setLoading(false);
+          });
+      }, []);
+
+      // Get all unique categories (from all data, before region filter)
+      const allCategories = useMemo(() => {
+        return [...new Set(raceData.map(d => d["Race Category"]))].sort();
+      }, [raceData]);
+      
+      // Get all available regions
+      const allRegions = useMemo(() => {
+        return [...new Set(raceData.map(d => d.Region))].sort((a, b) => a - b);
+      }, [raceData]);
+      
+      // Get year from data
+      const dataYear = useMemo(() => {
+        if (raceData.length === 0) return 2025;
+        return raceData[0].Year || 2025;
+      }, [raceData]);
+      
+      // Filter data by selected regions
+      const filteredRaceData = useMemo(() => {
+        if (selectedRegions.length === 0) return raceData;
+        return raceData.filter(d => selectedRegions.includes(d.Region));
+      }, [raceData, selectedRegions]);
+      
+      // Get all unique teams and races from filtered data
+      const allTeams = useMemo(() => [...new Set(filteredRaceData.map(d => d.Team))].sort(), [filteredRaceData]);
+      const allRaces = useMemo(() => {
+        const races = [...new Set(filteredRaceData.map(d => d.Race))];
+        return races.sort((a, b) => {
+          const numA = parseInt(a.match(/\d+/)?.[0] || 0);
+          const numB = parseInt(b.match(/\d+/)?.[0] || 0);
+          return numA - numB;
+        });
+      }, [filteredRaceData]);
+
+      // Get unique riders with team info from filtered data
+      const riderWithTeam = useMemo(() => {
+        return [...new Set(filteredRaceData.map(d => d.Name))].sort().map(name => ({
+          name,
+          team: filteredRaceData.find(d => d.Name === name)?.Team || '',
+          races: filteredRaceData.filter(d => d.Name === name).length
+        }));
+      }, [filteredRaceData]);
+
+      // Filter riders based on search
+      const filteredRiders = riderWithTeam.filter(rider => 
+        rider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        rider.team.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+
+      // Get selected rider data
+      const riderRaces = filteredRaceData.filter(d => d.Name === selectedRider).sort((a, b) => a.RaceNum - b.RaceNum);
+      const riderTeam = riderRaces[0]?.Team || '';
+      const totalRaces = riderRaces.length;
+      const bestPlacement = riderRaces.length > 0 ? Math.min(...riderRaces.map(r => parseInt(r.Placement))) : 0;
+      const podiumCount = riderRaces.filter(r => parseInt(r.Placement) <= 5).length;
+
+      // Format time helper
+      const formatTime = (seconds) => {
+        if (!seconds) return 'DNF';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        const ms = Math.floor((seconds % 1) * 100);
+        return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+      };
+
+      // Parse time helper
+      const parseTimeToSeconds = (timeStr) => {
+        if (!timeStr) return null;
+        const parts = timeStr.split(':');
+        if (parts.length === 2) {
+          return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+        }
+        return null;
+      };
+
+      // Generate race analysis
+      const generateRaceAnalysis = (race, idx, allRaces) => {
+        const placement = parseInt(race.Placement);
+        let analysis = '';
+        let focus = '';
+
+        if (placement === 1) {
+          analysis = `🥇 Victory! You dominated this race with a first-place finish.`;
+          focus = `Keep doing what you're doing—your training is paying off!`;
+        } else if (placement <= 5) {
+          analysis = `🏅 Podium finish! You earned ${placement === 2 ? '2nd' : placement === 3 ? '3rd' : placement + 'th'} place.`;
+          focus = `Great result! To reach the top step, focus on explosive power and race-start technique.`;
+        } else if (placement <= 10) {
+          analysis = `Solid top-10 finish in ${placement}${placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'} place.`;
+          focus = `You're close to podium! Work on sustained climbing power and technical descending.`;
+        } else {
+          analysis = `Finished in ${placement}${placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'} place.`;
+          focus = `Every race is progress. Focus on building endurance and maintaining consistent lap times.`;
+        }
+
+        // Calculate gap to next rider ahead (if not 1st place)
+        if (placement > 1 && race.TotalSeconds) {
+          const nextRider = filteredRaceData.find(d => 
+            d.Race === race.Race && 
+            d["Race Category"] === race["Race Category"] && 
+            parseInt(d.Placement) === placement - 1 &&
+            d.TotalSeconds
+          );
+          
+          if (nextRider) {
+            const gap = race.TotalSeconds - nextRider.TotalSeconds;
+            const mins = Math.floor(gap / 60);
+            const secs = Math.floor(gap % 60);
+            const gapStr = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
+            
+            if (placement === 6 && gap < 60) {
+              analysis += ` You were only ${gapStr} behind podium—so close!`;
+            } else if (placement <= 10 && gap < 30) {
+              analysis += ` Just ${gapStr} behind the next rider—you're right there!`;
+            } else if (gap < 120) {
+              analysis += ` Gap to next place: ${gapStr}.`;
+            }
+          }
+        }
+
+        // Compare to previous race in same category
+        if (idx > 0 && race.TotalSeconds) {
+          const prevRaceSameCategory = allRaces
+            .slice(0, idx)
+            .reverse()
+            .find(r => r["Race Category"] === race["Race Category"] && r.TotalSeconds);
+          
+          if (prevRaceSameCategory) {
+            const timeDiff = prevRaceSameCategory.TotalSeconds - race.TotalSeconds;
+            const mins = Math.floor(Math.abs(timeDiff) / 60);
+            const secs = Math.floor(Math.abs(timeDiff) % 60);
+            const timeStr = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${Math.floor(Math.abs(timeDiff))}s`;
+            
+            if (timeDiff > 30) {
+              analysis += ` 🎉 Personal best! You improved by ${timeStr} from your last race in this category!`;
+            } else if (timeDiff > 10) {
+              analysis += ` Nice improvement of ${timeStr} from your last race!`;
+            } else if (timeDiff < -30) {
+              analysis += ` This was a tougher race—don't get discouraged, keep training!`;
+            }
+          }
+        }
+
+        // Compare placement to previous race
+        if (idx > 0 && allRaces[idx - 1]) {
+          const prevPlacement = parseInt(allRaces[idx - 1].Placement);
+          const improvementOrDecline = prevPlacement - placement;
+          
+          if (improvementOrDecline > 5) {
+            analysis += ` Huge improvement from last race (up ${improvementOrDecline} places)!`;
+          } else if (improvementOrDecline > 0) {
+            analysis += ` Nice progress from last race (up ${improvementOrDecline} ${improvementOrDecline === 1 ? 'place' : 'places'}).`;
+          }
+        }
+
+        // Lap consistency analysis
+        const lap1 = parseTimeToSeconds(race.LAP1);
+        const lap2 = parseTimeToSeconds(race.LAP2);
+        let lapDifference = null;
+        
+        if (lap1 && lap2) {
+          lapDifference = lap2 - lap1;
+        }
+        
+        if (lapDifference !== null) {
+          if (lapDifference > 120) {
+            const mins = Math.floor(lapDifference / 60);
+            const secs = Math.floor(lapDifference % 60);
+            const timeStr = mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`;
+            focus += ` Your second lap was ${timeStr} slower—work on pacing strategy to maintain speed through the whole race.`;
+          } else if (lapDifference < 30) {
+            focus += ` Great lap consistency! Your even pacing is a strength to maintain.`;
+          }
+        }
+        
+        return { analysis, focus };
+      };
+
+      // Calculate team metrics
+      const calculateTeamMetrics = (teamName) => {
+        let teamData = filteredRaceData.filter(d => d.Team === teamName);
+        
+        if (raceFilter !== 'all') {
+          teamData = teamData.filter(d => d.Race === raceFilter);
+        }
+
+        const uniqueRiders = new Set(teamData.map(d => d.Name)).size;
+        const podiumFinishes = teamData.filter(d => parseInt(d.Placement) >= 1 && parseInt(d.Placement) <= 5).length;
+        
+        // Calculate top 25% finishers
+        let top25Count = 0;
+        const categoryCounts = {};
+        
+        teamData.forEach(entry => {
+          const category = entry["Race Category"];
+          const race = entry.Race;
+          const key = `${race}-${category}`;
+          
+          if (!categoryCounts[key]) {
+            const categoryData = filteredRaceData.filter(d => d.Race === race && d["Race Category"] === category);
+            categoryCounts[key] = categoryData.length;
+          }
+          
+          const threshold = Math.ceil(categoryCounts[key] * 0.25);
+          if (parseInt(entry.Placement) <= threshold) {
+            top25Count++;
+          }
+        });
+
+        // Calculate average gap to winner
+        let totalGap = 0;
+        let gapCount = 0;
+        
+        teamData.forEach(entry => {
+          if (entry.TotalSeconds && parseInt(entry.Placement) > 1) {
+            const winnerData = filteredRaceData.find(d => 
+              d.Race === entry.Race && 
+              d["Race Category"] === entry["Race Category"] && 
+              d.Placement === "1"
+            );
+            
+            if (winnerData && winnerData.TotalSeconds) {
+              const gap = entry.TotalSeconds - winnerData.TotalSeconds;
+              totalGap += gap;
+              gapCount++;
+            }
+          }
+        });
+        
+        const avgGap = gapCount > 0 ? totalGap / gapCount : 0;
+
+        // Calculate gender distribution
+        const uniqueRidersByGender = {};
+        teamData.forEach(entry => {
+          const gender = getGender(entry["Race Category"]);
+          if (!uniqueRidersByGender[gender]) {
+            uniqueRidersByGender[gender] = new Set();
+          }
+          uniqueRidersByGender[gender].add(entry.Name);
+        });
+
+        const maleCount = uniqueRidersByGender['Male']?.size || 0;
+        const femaleCount = uniqueRidersByGender['Female']?.size || 0;
+        const totalGenderCount = maleCount + femaleCount;
+
+        // Calculate category distribution - only count each rider in their highest category
+        const categoryHierarchy = ['Varsity', 'JV', 'Freshman', 'SLR', 'Advanced', 'Intermediate', 'Beginner', 'Other'];
+        const riderCategories = {}; // Map of rider name to all their categories
+        
+        teamData.forEach(entry => {
+          const level = getCategoryLevel(entry["Race Category"]);
+          if (!riderCategories[entry.Name]) {
+            riderCategories[entry.Name] = new Set();
+          }
+          riderCategories[entry.Name].add(level);
+        });
+        
+        // For each rider, find their highest category
+        const categoryDistribution = {};
+        Object.keys(riderCategories).forEach(riderName => {
+          const categories = Array.from(riderCategories[riderName]);
+          // Find the highest category (lowest index in hierarchy)
+          let highestCategory = 'Other';
+          let highestIndex = categoryHierarchy.length;
+          
+          categories.forEach(cat => {
+            const idx = categoryHierarchy.indexOf(cat);
+            if (idx !== -1 && idx < highestIndex) {
+              highestIndex = idx;
+              highestCategory = cat;
+            }
+          });
+          
+          if (!categoryDistribution[highestCategory]) {
+            categoryDistribution[highestCategory] = 0;
+          }
+          categoryDistribution[highestCategory]++;
+        });
+
+        return {
+          teamName,
+          totalRacers: uniqueRiders,
+          podiumFinishes,
+          top25Count,
+          avgGap: Math.round(avgGap),
+          maleCount,
+          femaleCount,
+          malePercent: totalGenderCount > 0 ? Math.round((maleCount / totalGenderCount) * 100) : 0,
+          femalePercent: totalGenderCount > 0 ? Math.round((femaleCount / totalGenderCount) * 100) : 0,
+          categoryDistribution
+        };
+      };
+
+      // Calculate metrics for all teams
+      const teamMetrics = useMemo(() => {
+        return allTeams.map(team => calculateTeamMetrics(team));
+      }, [allTeams, raceFilter, filteredRaceData]);
+
+      // Apply team filters
+      const filteredTeamMetrics = useMemo(() => {
+        let filtered = teamMetrics;
+        
+        if (showOnlyNeboGoats) {
+          filtered = filtered.filter(t => NEBO_GOATS_TEAMS.includes(t.teamName));
+        }
+        
+        if (selectedTeams.length > 0) {
+          filtered = filtered.filter(t => selectedTeams.includes(t.teamName));
+        }
+        
+        return filtered;
+      }, [teamMetrics, showOnlyNeboGoats, selectedTeams]);
+
+      // Sort team metrics
+      const sortedTeamMetrics = useMemo(() => {
+        const sorted = [...filteredTeamMetrics];
+        sorted.sort((a, b) => {
+          let valA = a[sortColumn];
+          let valB = b[sortColumn];
+          
+          if (sortColumn === 'teamName') {
+            return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+          }
+          
+          return sortDirection === 'asc' ? valA - valB : valB - valA;
+        });
+        return sorted;
+      }, [filteredTeamMetrics, sortColumn, sortDirection]);
+      
+      // Category Analysis data
+      const categoryAnalysisData = useMemo(() => {
+        if (!analysisTeam || !analysisCategory) return [];
+        
+        // Filter by race if selected
+        let filteredData = filteredRaceData.filter(d => d["Race Category"] === analysisCategory);
+        if (analysisRace !== 'all') {
+          filteredData = filteredData.filter(d => d.Race === analysisRace);
+        }
+        
+        // Get top 5 finishers in the category
+        const top5 = filteredData
+          .sort((a, b) => parseInt(a.Placement) - parseInt(b.Placement))
+          .slice(0, 5);
+        
+        // Get all racers from selected team in this category
+        const teamRacers = filteredData.filter(d => d.Team === analysisTeam);
+        
+        // Combine and remove duplicates (in case team has someone in top 5)
+        const combined = [...top5];
+        teamRacers.forEach(racer => {
+          if (!combined.find(r => r.Name === racer.Name && r.Race === racer.Race)) {
+            combined.push(racer);
+          }
+        });
+        
+        // Sort by placement
+        return combined.sort((a, b) => parseInt(a.Placement) - parseInt(b.Placement));
+      }, [analysisTeam, analysisCategory, analysisRace, filteredRaceData]);
+
+      // Category Leaderboard data - all entries sorted by time
+      const leaderboardData = useMemo(() => {
+        if (!leaderboardCategory) return [];
+        
+        let data = filteredRaceData.filter(d => 
+          d["Race Category"] === leaderboardCategory && d.TotalSeconds
+        );
+        
+        // Apply global race filter
+        if (raceFilter !== 'all') {
+          data = data.filter(d => d.Race === raceFilter);
+        }
+        
+        // Apply team filter (or Nebo Goats filter)
+        if (showOnlyNeboGoats) {
+          data = data.filter(d => NEBO_GOATS_TEAMS.includes(d.Team));
+        } else if (selectedTeams.length > 0) {
+          data = data.filter(d => selectedTeams.includes(d.Team));
+        }
+        
+        // Sort by total time (fastest first)
+        return data.sort((a, b) => a.TotalSeconds - b.TotalSeconds).map((entry, idx) => ({
+          ...entry,
+          rank: idx + 1
+        }));
+      }, [leaderboardCategory, raceFilter, selectedTeams, showOnlyNeboGoats, filteredRaceData]);
+      
+      // Find searched rider's best time index for highlighting
+      const searchedRiderIndex = useMemo(() => {
+        if (!leaderboardSearch || !leaderboardData.length) return -1;
+        const searchLower = leaderboardSearch.toLowerCase();
+        return leaderboardData.findIndex(d => d.Name.toLowerCase().includes(searchLower));
+      }, [leaderboardSearch, leaderboardData]);
+      
+      // Helper to check if a rider matches search
+      const matchesSearch = (name) => {
+        if (!leaderboardSearch) return false;
+        return name.toLowerCase().includes(leaderboardSearch.toLowerCase());
+      };
+      
+      // Auto-scroll to first match within table container (not page)
+      useEffect(() => {
+        if (searchedRiderIndex >= 0 && highlightedRowRef.current && leaderboardTableRef.current && leaderboardSearch.length >= 2) {
+          const container = leaderboardTableRef.current;
+          const row = highlightedRowRef.current;
+          const rowRect = row.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          const scrollTop = container.scrollTop + (rowRect.top - containerRect.top) - 50;
+          container.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
+        }
+      }, [searchedRiderIndex, leaderboardSearch]);
+      
+      // Toggle section open/closed
+      const toggleSection = (section) => {
+        setSectionsOpen(prev => ({ ...prev, [section]: !prev[section] }));
+      };
+
+      const handleSort = (column) => {
+        if (sortColumn === column) {
+          setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+          setSortColumn(column);
+          setSortDirection('desc');
+        }
+      };
+
+      const handleTeamSelect = (e) => {
+        const options = e.target.options;
+        const selected = [];
+        for (let i = 0; i < options.length; i++) {
+          if (options[i].selected) {
+            selected.push(options[i].value);
+          }
+        }
+        setSelectedTeams(selected);
+      };
+
+      if (loading) {
+        return (
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-800 mb-2">Loading race data...</div>
+              <div className="text-gray-600">Please wait</div>
+            </div>
+          </div>
+        );
+      }
+
+      if (error) {
+        return (
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-red-600 mb-2">Error Loading Data</div>
+              <div className="text-gray-600">{error}</div>
+              <div className="text-sm text-gray-500 mt-4">Make sure race_data_all.json is in the same directory</div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-50">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
+            <div className="max-w-7xl mx-auto px-4 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold">{dataYear} Utah HS MTB Analytics</h1>
+                  
+                  {/* Region Dropdown */}
+                  <div className="relative mt-1" ref={regionDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); setRegionDropdownOpen(!regionDropdownOpen); }}
+                      className="flex items-center gap-2 text-sm text-white bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full transition"
+                    >
+                      <span>
+                        {selectedRegions.length === 0 
+                          ? 'All Regions' 
+                          : selectedRegions.length === allRegions.length 
+                            ? 'All Regions'
+                            : `Region${selectedRegions.length > 1 ? 's' : ''} ${selectedRegions.sort((a,b) => a-b).join(', ')}`}
+                      </span>
+                      <svg className={`w-4 h-4 transition-transform ${regionDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    
+                    {regionDropdownOpen && (
+                      <div className="absolute z-30 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[160px]">
+                        {allRegions.map(region => (
+                          <label 
+                            key={region}
+                            className="flex items-center px-4 py-2 hover:bg-orange-50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedRegions.includes(region)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedRegions([...selectedRegions, region]);
+                                } else {
+                                  setSelectedRegions(selectedRegions.filter(r => r !== region));
+                                }
+                              }}
+                              className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
+                            />
+                            <span className="ml-2 text-gray-700 text-sm">Region {region}</span>
+                          </label>
+                        ))}
+                        <div className="border-t border-gray-200 mt-2 pt-2 px-4">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setSelectedRegions([5]); }}
+                            className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                          >
+                            Reset to Region 5
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <img src="nebo_goats_logo_transparent.png" alt="Nebo Goats" className="h-16 w-16" />
+              </div>
+            </div>
+          </div>
+
+          {/* Navigation Tabs */}
+          <div className="bg-white shadow">
+            <div className="max-w-7xl mx-auto px-4 py-4">
+              <div className="flex justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setActivePage('teams'); }}
+                  className={`px-8 py-3 rounded-lg text-base font-semibold transition ${
+                    activePage === 'teams' 
+                      ? 'bg-orange-500 text-white shadow-md' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Teams
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setActivePage('individuals'); }}
+                  className={`px-8 py-3 rounded-lg text-base font-semibold transition ${
+                    activePage === 'individuals' 
+                      ? 'bg-orange-500 text-white shadow-md' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Individuals
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Teams Page */}
+          {activePage === 'teams' && (
+            <div className="max-w-7xl mx-auto p-4">
+              {/* Filters - Single Row Layout */}
+              <div className="bg-white rounded-lg shadow p-3 mb-4">
+                <div className="grid grid-cols-3 gap-4 items-start">
+                  {/* Team Dropdown Checkbox */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Select Teams {selectedTeams.length > 0 && `(${selectedTeams.length})`}
+                    </label>
+                    <div className="relative" ref={teamDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); if (!showOnlyNeboGoats) setTeamDropdownOpen(!teamDropdownOpen); }}
+                        disabled={showOnlyNeboGoats}
+                        className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg text-left flex items-center justify-between ${
+                          showOnlyNeboGoats ? 'bg-gray-100 text-gray-400' : 'bg-white hover:border-gray-400'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {selectedTeams.length === 0 
+                            ? 'All Teams' 
+                            : selectedTeams.length <= 2 
+                              ? selectedTeams.join(', ')
+                              : `${selectedTeams.length} teams selected`}
+                        </span>
+                        <svg className={`w-4 h-4 text-gray-400 transition-transform ${teamDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {teamDropdownOpen && (
+                        <div className="absolute z-30 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 py-2 max-h-64 overflow-y-auto">
+                          {allTeams.map(team => (
+                            <label 
+                              key={team}
+                              className="flex items-center px-3 py-2 hover:bg-orange-50 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedTeams.includes(team)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedTeams([...selectedTeams, team]);
+                                  } else {
+                                    setSelectedTeams(selectedTeams.filter(t => t !== team));
+                                  }
+                                }}
+                                className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
+                              />
+                              <span className="ml-2 text-gray-700 text-sm">
+                                {team} {NEBO_GOATS_TEAMS.includes(team) ? '🐐' : ''}
+                              </span>
+                            </label>
+                          ))}
+                          <div className="border-t border-gray-200 mt-2 pt-2 px-3">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); setSelectedTeams([]); }}
+                              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                            >
+                              Reset (Show All)
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Race Filter */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Race Filter</label>
+                    <select
+                      value={raceFilter}
+                      onChange={(e) => setRaceFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="all">All Races</option>
+                      {allRaces.map(race => (
+                        <option key={race} value={race}>{race}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Nebo Goats Toggle Switch */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Show Nebo Goats Only</label>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setShowOnlyNeboGoats(!showOnlyNeboGoats);
+                        if (!showOnlyNeboGoats) setSelectedTeams([]);
+                      }}
+                      className={`relative inline-flex h-10 w-20 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
+                        showOnlyNeboGoats ? 'bg-orange-500' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-8 w-8 transform rounded-full bg-white shadow-lg transition-transform ${
+                          showOnlyNeboGoats ? 'translate-x-11' : 'translate-x-1'
+                        }`}
+                      >
+                        <span className="flex items-center justify-center h-full text-lg">
+                          {showOnlyNeboGoats ? '🐐' : ''}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Team Comparison Section */}
+              <CollapsibleSection id="teamComparison" title="Team Comparison" icon="📊" isOpen={sectionsOpen.teamComparison} onToggle={toggleSection}>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th 
+                          onClick={() => handleSort('teamName')}
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                        >
+                          Team {sortColumn === 'teamName' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th 
+                          onClick={() => handleSort('totalRacers')}
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                        >
+                          Racers {sortColumn === 'totalRacers' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th 
+                          onClick={() => handleSort('podiumFinishes')}
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                        >
+                          Podiums {sortColumn === 'podiumFinishes' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th 
+                          onClick={() => handleSort('top25Count')}
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                        >
+                          Top 25% In Category {sortColumn === 'top25Count' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                        <th 
+                          onClick={() => handleSort('avgGap')}
+                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                        >
+                          Avg Gap To First In Category {sortColumn === 'avgGap' && (sortDirection === 'asc' ? '↑' : '↓')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {sortedTeamMetrics.map((team, idx) => {
+                        const isNebo = NEBO_GOATS_TEAMS.includes(team.teamName);
+                        return (
+                          <tr key={idx} className={isNebo ? 'bg-orange-50' : 'hover:bg-gray-50'}>
+                            <td className="px-4 py-2 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900">
+                                {team.teamName} {isNebo && '🐐'}
+                              </div>
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                              {team.totalRacers}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-yellow-600 font-semibold">
+                              {team.podiumFinishes}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-blue-600 font-semibold">
+                              {team.top25Count}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                              {team.avgGap > 0 ? (() => {
+                                const mins = Math.floor(team.avgGap / 60);
+                                const secs = Math.floor(team.avgGap % 60);
+                                return `${mins}:${secs.toString().padStart(2, '0')}`;
+                              })() : 'N/A'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CollapsibleSection>
+
+              {/* Category Leaderboard Section */}
+              <CollapsibleSection id="categoryLeaderboard" title="Category Leaderboard" icon="🏆" isOpen={sectionsOpen.categoryLeaderboard} onToggle={toggleSection}>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Category *</label>
+                    <select
+                      value={leaderboardCategory}
+                      onChange={(e) => setLeaderboardCategory(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="">-- Choose Category --</option>
+                      {allCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Find Rider</label>
+                    <input
+                      type="text"
+                      value={leaderboardSearch}
+                      onChange={(e) => setLeaderboardSearch(e.target.value)}
+                      placeholder="Type rider name..."
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+                
+                {leaderboardCategory && leaderboardData.length > 0 && (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto" ref={leaderboardTableRef}>
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-orange-500 text-white sticky top-0">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Rank</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Name</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Team</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Region</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Race</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Race Place</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Total Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {leaderboardData.map((entry, idx) => {
+                          const isSearched = matchesSearch(entry.Name);
+                          const isFirstMatch = isSearched && idx === searchedRiderIndex;
+                          const isNebo = NEBO_GOATS_TEAMS.includes(entry.Team);
+                          
+                          return (
+                            <tr 
+                              key={idx} 
+                              ref={isFirstMatch ? highlightedRowRef : null}
+                              className={`${isSearched ? 'bg-yellow-200 font-bold' : isNebo ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
+                                {entry.rank <= 3 ? ['🥇','🥈','🥉'][entry.rank-1] : ''} #{entry.rank}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Name}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Team} {isNebo && '🐐'}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Region}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Race}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">#{entry.Placement}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm font-semibold">{entry["Total Time"]}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {leaderboardCategory && leaderboardData.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    No data found for this category.
+                  </div>
+                )}
+                
+                {!leaderboardCategory && (
+                  <div className="text-center py-8 text-gray-500">
+                    Please select a category to view the leaderboard.
+                  </div>
+                )}
+              </CollapsibleSection>
+
+              {/* Gender Balance Section */}
+              <CollapsibleSection id="genderBalance" title="Gender Balance" icon="👥" isOpen={sectionsOpen.genderBalance} onToggle={toggleSection}>
+                <div className="space-y-2">
+                  {sortedTeamMetrics.map((team, idx) => {
+                    const isNebo = NEBO_GOATS_TEAMS.includes(team.teamName);
+                    const total = team.maleCount + team.femaleCount;
+                    if (total === 0) return null;
+                    
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className={`w-32 text-xs font-medium ${isNebo ? 'text-orange-600' : 'text-gray-700'}`}>
+                          {team.teamName}
+                        </div>
+                        <div className="flex-1 h-6 flex rounded overflow-hidden border border-gray-200">
+                          <div 
+                            className="bg-blue-500 flex items-center justify-center text-white text-xs font-medium"
+                            style={{ width: `${team.malePercent}%` }}
+                            title={`${team.maleCount} boys`}
+                          >
+                            {team.malePercent > 15 && `${team.malePercent}%`}
+                          </div>
+                          <div 
+                            className="bg-pink-500 flex items-center justify-center text-white text-xs font-medium"
+                            style={{ width: `${team.femalePercent}%` }}
+                            title={`${team.femaleCount} girls`}
+                          >
+                            {team.femalePercent > 15 && `${team.femalePercent}%`}
+                          </div>
+                        </div>
+                        <div className="w-32 text-xs text-gray-600">
+                          {team.maleCount}M / {team.femaleCount}F
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CollapsibleSection>
+
+              {/* Program Funnel Section */}
+              <CollapsibleSection id="programFunnel" title="Program Development Funnel" icon="🎯" isOpen={sectionsOpen.programFunnel} onToggle={toggleSection}>
+                <div className="space-y-2">
+                  {sortedTeamMetrics.map((team, idx) => {
+                    const isNebo = NEBO_GOATS_TEAMS.includes(team.teamName);
+                    const dist = team.categoryDistribution;
+                    const total = Object.values(dist).reduce((sum, val) => sum + val, 0);
+                    if (total === 0) return null;
+
+                    const categories = ['Beginner', 'Intermediate', 'Advanced', 'SLR', 'Freshman', 'JV', 'Varsity'];
+                    const colors = {
+                      'Beginner': 'bg-green-300',
+                      'Intermediate': 'bg-green-400',
+                      'Advanced': 'bg-green-500',
+                      'SLR': 'bg-yellow-300',
+                      'Freshman': 'bg-blue-300',
+                      'JV': 'bg-blue-500',
+                      'Varsity': 'bg-purple-600'
+                    };
+
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className={`w-32 text-xs font-medium ${isNebo ? 'text-orange-600' : 'text-gray-700'}`}>
+                          {team.teamName}
+                        </div>
+                        <div className="flex-1 h-6 flex rounded overflow-hidden border border-gray-200">
+                          {categories.map(cat => {
+                            const count = dist[cat] || 0;
+                            if (count === 0) return null;
+                            const percent = (count / total) * 100;
+                            return (
+                              <div
+                                key={cat}
+                                className={`${colors[cat]} flex items-center justify-center text-white text-xs font-medium`}
+                                style={{ width: `${percent}%` }}
+                                title={`${cat}: ${count} riders`}
+                              >
+                                {percent > 8 && count}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="w-32 text-xs text-gray-600">
+                          {total} riders
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-2 text-xs">
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-green-300 rounded"></span> Beginner
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-green-400 rounded"></span> Intermediate
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-green-500 rounded"></span> Advanced
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-yellow-300 rounded"></span> SLR
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-blue-300 rounded"></span> Freshman
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-blue-500 rounded"></span> JV
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 bg-purple-600 rounded"></span> Varsity
+                  </span>
+                </div>
+                <div className="mt-2 text-xs text-gray-500 italic">
+                  Note: Riders who competed in multiple categories are counted only in their highest category.
+                </div>
+              </CollapsibleSection>
+
+              {/* Team Category Analysis Section */}
+              <CollapsibleSection id="categoryAnalysis" title="Team Category Analysis" icon="🔍" isOpen={sectionsOpen.categoryAnalysis} onToggle={toggleSection}>
+                {/* Dropdowns */}
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Team</label>
+                    <select
+                      value={analysisTeam}
+                      onChange={(e) => setAnalysisTeam(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="">-- Choose Team --</option>
+                      {allTeams.map(team => (
+                        <option key={team} value={team}>{team}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Category</label>
+                    <select
+                      value={analysisCategory}
+                      onChange={(e) => setAnalysisCategory(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="">-- Choose Category --</option>
+                      {allCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Race Filter</label>
+                    <select
+                      value={analysisRace}
+                      onChange={(e) => setAnalysisRace(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="all">All Races</option>
+                      {allRaces.map(race => (
+                        <option key={race} value={race}>{race}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Results Table */}
+                {analysisTeam && analysisCategory && categoryAnalysisData.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-orange-500 text-white">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Placement</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Racer Name</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">High School</th>
+                          {analysisRace === 'all' && <th className="px-4 py-2 text-left text-xs font-semibold">Race</th>}
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap1</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap2</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap3</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap4</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold">Total Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {categoryAnalysisData.map((racer, idx) => {
+                          const isSelectedTeam = racer.Team === analysisTeam;
+                          const isTop5 = parseInt(racer.Placement) <= 5;
+                          
+                          return (
+                            <tr key={idx} className={isSelectedTeam ? 'bg-orange-50 font-semibold' : isTop5 ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">
+                                {racer.Placement === "1" ? '🥇' : racer.Placement === "2" ? '🥈' : racer.Placement === "3" ? '🥉' : racer.Placement === "4" ? '🏅' : racer.Placement === "5" ? '🏅' : ''} #{racer.Placement}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Name}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Team}</td>
+                              {analysisRace === 'all' && <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Race}</td>}
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP1 || '-'}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP2 || '-'}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP3 || '-'}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP4 || '-'}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm font-semibold">
+                                {racer["Total Time"] || 'DNF'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {analysisTeam && analysisCategory && categoryAnalysisData.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    No data found for this team and category combination.
+                  </div>
+                )}
+                
+                {(!analysisTeam || !analysisCategory) && (
+                  <div className="text-center py-8 text-gray-500">
+                    Please select both a team and a category to view the analysis.
+                  </div>
+                )}
+              </CollapsibleSection>
+            </div>
+          )}
+
+          {/* Individual Racers Page */}
+          {activePage === 'individuals' && (
+            <div className="max-w-7xl mx-auto p-4">
+              {/* Rider Selection - Searchable Dropdown */}
+              <div className="bg-white rounded-lg shadow p-4 mb-4">
+                <h2 className="text-lg font-bold mb-3 text-gray-800">Select a Rider</h2>
+                
+                <div className="relative">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search by rider name or team..."
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setShowDropdown(true);
+                      }}
+                      onFocus={() => setShowDropdown(true)}
+                      className="w-full px-4 py-3 pr-10 text-base border-2 border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
+                    />
+                    <svg 
+                      className="absolute right-3 top-3.5 w-5 h-5 text-gray-400"
+                      fill="none" 
+                      stroke="currentColor" 
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+
+                  {showDropdown && filteredRiders.length > 0 && (
+                    <div className="absolute z-20 w-full mt-1 bg-white border-2 border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                      {filteredRiders.map(rider => (
+                        <button
+                          type="button"
+                          key={rider.name}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setSelectedRider(rider.name);
+                            setSearchTerm('');
+                            setShowDropdown(false);
+                          }}
+                          className="w-full px-4 py-3 text-left hover:bg-orange-50 border-b border-gray-100 last:border-0 transition-colors"
+                        >
+                          <div className="font-semibold text-gray-900">{rider.name}</div>
+                          <div className="text-sm text-gray-600">
+                            {rider.team} • {rider.races} {rider.races === 1 ? 'race' : 'races'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Rider Stats Summary */}
+              {selectedRider && (
+                <>
+                  <div className="bg-white rounded-lg shadow p-4 mb-4">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900">{selectedRider}</h2>
+                        <p className="text-gray-600 mt-1">{riderTeam}</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm text-gray-600">2025 Season</div>
+                        <div className="text-lg font-semibold text-orange-600">{totalRaces} Races</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg">
+                        <div className="text-sm text-gray-600 mb-1">Best Placement</div>
+                        <div className="text-2xl font-bold text-blue-700">
+                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : `#${bestPlacement}`}
+                        </div>
+                      </div>
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg">
+                        <div className="text-sm text-gray-600 mb-1">Total Races</div>
+                        <div className="text-2xl font-bold text-green-700">{totalRaces}</div>
+                      </div>
+                      {podiumCount > 0 && (
+                        <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 p-3 rounded-lg">
+                          <div className="text-sm text-gray-600 mb-1">Podium Finishes</div>
+                          <div className="text-2xl font-bold text-yellow-700">🏅 {podiumCount}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Race-by-Race Performance */}
+                  <div className="bg-white rounded-lg shadow p-4">
+                    <h2 className="text-xl font-bold text-gray-900 mb-4">Race-by-Race Performance</h2>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {riderRaces.map((race, idx) => {
+                        const placement = parseInt(race.Placement);
+                        const { analysis, focus } = generateRaceAnalysis(race, idx, riderRaces);
+                        
+                        return (
+                          <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
+                            {/* Race Header */}
+                            <div className="bg-gray-900 text-white px-4 py-2 text-center font-bold text-sm">
+                              {race.Race}
+                            </div>
+                            
+                            {/* Race Details */}
+                            <div className="p-4 space-y-3">
+                              {/* Category */}
+                              <div>
+                                <div className="text-xs text-gray-600 mb-1">Category</div>
+                                <div className="text-sm font-medium text-gray-900">{race["Race Category"]}</div>
+                              </div>
+                              
+                              {/* Placement */}
+                              <div>
+                                <div className="text-xs text-gray-600 mb-1">Placement</div>
+                                <div className="text-3xl font-bold text-gray-900">
+                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : ''}#{placement}
+                                </div>
+                              </div>
+                              
+                              {/* Lap Times */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-600">Lap 1</span>
+                                  <span className="font-medium text-gray-900">{race.LAP1 || '-'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-600">Lap 2</span>
+                                  <span className="font-medium text-gray-900">{race.LAP2 || '-'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-600">Lap 3</span>
+                                  <span className="font-medium text-gray-900">{race.LAP3 || '-'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-gray-600">Lap 4</span>
+                                  <span className="font-medium text-gray-900">{race.LAP4 || '-'}</span>
+                                </div>
+                              </div>
+                              
+                              {/* Total Time */}
+                              <div className="pt-2 border-t border-gray-200">
+                                <div className="text-xs text-gray-600 mb-1">Total Time</div>
+                                <div className="text-lg font-bold text-gray-900">
+                                  {formatTime(race.TotalSeconds)}
+                                </div>
+                              </div>
+                              
+                              {/* Analysis */}
+                              <div className="pt-2 border-t border-gray-200 space-y-2">
+                                <div>
+                                  <div className="text-xs font-semibold text-orange-600 mb-1">📊 Race Analysis</div>
+                                  <p className="text-xs text-gray-700 leading-relaxed">{analysis}</p>
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-orange-600 mb-1">💪 Focus on:</div>
+                                  <p className="text-xs text-gray-700 leading-relaxed">{focus}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
