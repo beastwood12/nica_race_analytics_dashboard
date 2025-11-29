@@ -35,6 +35,13 @@
       return category.includes('Girls') ? 'Female' : 'Male';
     };
 
+    // Helper function for ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
+    const getOrdinal = (n) => {
+      const s = ['th', 'st', 'nd', 'rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    };
+
     // Collapsible Section component - defined outside App to prevent re-creation on render
     const CollapsibleSection = ({ id, title, icon, isOpen, onToggle, children }) => (
       <div className="bg-white rounded-lg shadow mb-4 overflow-hidden">
@@ -72,11 +79,6 @@
       const [selectedTeams, setSelectedTeams] = useState([]);
       const [showOnlyNeboGoats, setShowOnlyNeboGoats] = useState(false);
       
-      // Team Category Analysis state
-      const [analysisTeam, setAnalysisTeam] = useState('');
-      const [analysisCategory, setAnalysisCategory] = useState('');
-      const [analysisRace, setAnalysisRace] = useState('all');
-      
       // Individual page state
       const [selectedRider, setSelectedRider] = useState('');
       const [searchTerm, setSearchTerm] = useState('');
@@ -96,8 +98,7 @@
         teamComparison: true,
         categoryLeaderboard: false,
         genderBalance: false,
-        programFunnel: false,
-        categoryAnalysis: false
+        programFunnel: false
       });
       
       // Category Leaderboard state
@@ -178,13 +179,17 @@
         });
       }, [filteredRaceData]);
 
-      // Get unique riders with team info from filtered data
+      // Get unique riders with team info from filtered data (O(n) using Map)
       const riderWithTeam = useMemo(() => {
-        return [...new Set(filteredRaceData.map(d => d.Name))].sort().map(name => ({
-          name,
-          team: filteredRaceData.find(d => d.Name === name)?.Team || '',
-          races: filteredRaceData.filter(d => d.Name === name).length
-        }));
+        const riderMap = new Map();
+        filteredRaceData.forEach(d => {
+          if (!riderMap.has(d.Name)) {
+            riderMap.set(d.Name, { name: d.Name, team: d.Team, races: 1 });
+          } else {
+            riderMap.get(d.Name).races++;
+          }
+        });
+        return [...riderMap.values()].sort((a, b) => a.name.localeCompare(b.name));
       }, [filteredRaceData]);
 
       // Filter riders based on search
@@ -229,13 +234,13 @@
           analysis = `🥇 Victory! You dominated this race with a first-place finish.`;
           focus = `Keep doing what you're doing—your training is paying off!`;
         } else if (placement <= 5) {
-          analysis = `🏅 Podium finish! You earned ${placement === 2 ? '2nd' : placement === 3 ? '3rd' : placement + 'th'} place.`;
+          analysis = `🏅 Podium finish! You earned ${getOrdinal(placement)} place.`;
           focus = `Great result! To reach the top step, focus on explosive power and race-start technique.`;
         } else if (placement <= 10) {
-          analysis = `Solid top-10 finish in ${placement}${placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'} place.`;
+          analysis = `Solid top-10 finish in ${getOrdinal(placement)} place.`;
           focus = `You're close to podium! Work on sustained climbing power and technical descending.`;
         } else {
-          analysis = `Finished in ${placement}${placement === 1 ? 'st' : placement === 2 ? 'nd' : placement === 3 ? 'rd' : 'th'} place.`;
+          analysis = `Finished in ${getOrdinal(placement)} place.`;
           focus = `Every race is progress. Focus on building endurance and maintaining consistent lap times.`;
         }
 
@@ -472,36 +477,6 @@
         });
         return sorted;
       }, [filteredTeamMetrics, sortColumn, sortDirection]);
-      
-      // Category Analysis data
-      const categoryAnalysisData = useMemo(() => {
-        if (!analysisTeam || !analysisCategory) return [];
-        
-        // Filter by race if selected
-        let filteredData = filteredRaceData.filter(d => d["Race Category"] === analysisCategory);
-        if (analysisRace !== 'all') {
-          filteredData = filteredData.filter(d => d.Race === analysisRace);
-        }
-        
-        // Get top 5 finishers in the category
-        const top5 = filteredData
-          .sort((a, b) => parseInt(a.Placement) - parseInt(b.Placement))
-          .slice(0, 5);
-        
-        // Get all racers from selected team in this category
-        const teamRacers = filteredData.filter(d => d.Team === analysisTeam);
-        
-        // Combine and remove duplicates (in case team has someone in top 5)
-        const combined = [...top5];
-        teamRacers.forEach(racer => {
-          if (!combined.find(r => r.Name === racer.Name && r.Race === racer.Race)) {
-            combined.push(racer);
-          }
-        });
-        
-        // Sort by placement
-        return combined.sort((a, b) => parseInt(a.Placement) - parseInt(b.Placement));
-      }, [analysisTeam, analysisCategory, analysisRace, filteredRaceData]);
 
       // Category Leaderboard data - all entries sorted by time
       const leaderboardData = useMemo(() => {
@@ -1084,111 +1059,6 @@
                   Note: Riders who competed in multiple categories are counted only in their highest category.
                 </div>
               </CollapsibleSection>
-
-              {/* Team Category Analysis Section */}
-              <CollapsibleSection id="categoryAnalysis" title="Team Category Analysis" icon="🔍" isOpen={sectionsOpen.categoryAnalysis} onToggle={toggleSection}>
-                {/* Dropdowns */}
-                <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Team</label>
-                    <select
-                      value={analysisTeam}
-                      onChange={(e) => setAnalysisTeam(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    >
-                      <option value="">-- Choose Team --</option>
-                      {allTeams.map(team => (
-                        <option key={team} value={team}>{team}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Category</label>
-                    <select
-                      value={analysisCategory}
-                      onChange={(e) => setAnalysisCategory(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    >
-                      <option value="">-- Choose Category --</option>
-                      {allCategories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Race Filter</label>
-                    <select
-                      value={analysisRace}
-                      onChange={(e) => setAnalysisRace(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                    >
-                      <option value="all">All Races</option>
-                      {allRaces.map(race => (
-                        <option key={race} value={race}>{race}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Results Table */}
-                {analysisTeam && analysisCategory && categoryAnalysisData.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 text-sm">
-                      <thead className="bg-orange-500 text-white">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Placement</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Racer Name</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">High School</th>
-                          {analysisRace === 'all' && <th className="px-4 py-2 text-left text-xs font-semibold">Race</th>}
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap1</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap2</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap3</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Lap4</th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold">Total Time</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {categoryAnalysisData.map((racer, idx) => {
-                          const isSelectedTeam = racer.Team === analysisTeam;
-                          const isTop5 = parseInt(racer.Placement) <= 5;
-                          
-                          return (
-                            <tr key={idx} className={isSelectedTeam ? 'bg-orange-50 font-semibold' : isTop5 ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">
-                                {racer.Placement === "1" ? '🥇' : racer.Placement === "2" ? '🥈' : racer.Placement === "3" ? '🥉' : racer.Placement === "4" ? '🏅' : racer.Placement === "5" ? '🏅' : ''} #{racer.Placement}
-                              </td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Name}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Team}</td>
-                              {analysisRace === 'all' && <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.Race}</td>}
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP1 || '-'}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP2 || '-'}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP3 || '-'}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{racer.LAP4 || '-'}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm font-semibold">
-                                {racer["Total Time"] || 'DNF'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                
-                {analysisTeam && analysisCategory && categoryAnalysisData.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    No data found for this team and category combination.
-                  </div>
-                )}
-                
-                {(!analysisTeam || !analysisCategory) && (
-                  <div className="text-center py-8 text-gray-500">
-                    Please select both a team and a category to view the analysis.
-                  </div>
-                )}
-              </CollapsibleSection>
             </div>
           )}
 
@@ -1257,7 +1127,7 @@
                         <p className="text-gray-600 mt-1">{riderTeam}</p>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm text-gray-600">2025 Season</div>
+                        <div className="text-sm text-gray-600">{dataYear} Season</div>
                         <div className="text-lg font-semibold text-orange-600">{totalRaces} Races</div>
                       </div>
                     </div>
