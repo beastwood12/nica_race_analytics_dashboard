@@ -151,11 +151,37 @@
       const allCategories = useMemo(() => {
         return [...new Set(raceData.map(d => d["Race Category"]))].sort();
       }, [raceData]);
-      
-      // Get all available regions
-      const allRegions = useMemo(() => {
-        return [...new Set(raceData.map(d => d.Region))].sort((a, b) => a - b);
+
+      // Extract course name from race (e.g., "Region 5: Race 3 - Beaver" → "Beaver")
+      const getCourse = (raceName) => {
+        const parts = raceName.split(' - ');
+        return parts.length > 1 ? parts[parts.length - 1] : raceName;
+      };
+
+      // Get all unique courses (from all data)
+      const allCourses = useMemo(() => {
+        const courses = [...new Set(raceData.map(d => getCourse(d.Race)))];
+        return courses.sort();
       }, [raceData]);
+      
+      // Get all available regions (filtered by course if selected)
+      const allRegions = useMemo(() => {
+        let data = raceData;
+        if (courseFilter !== 'all') {
+          data = data.filter(d => getCourse(d.Race) === courseFilter);
+        }
+        return [...new Set(data.map(d => d.Region))].sort((a, b) => a - b);
+      }, [raceData, courseFilter]);
+
+      // Reset selected regions if they become invalid due to course filter
+      useEffect(() => {
+        if (courseFilter !== 'all' && selectedRegions.length > 0) {
+          const validRegions = selectedRegions.filter(r => allRegions.includes(r));
+          if (validRegions.length !== selectedRegions.length) {
+            setSelectedRegions(validRegions.length > 0 ? validRegions : allRegions);
+          }
+        }
+      }, [allRegions, courseFilter]);
       
       // Get year from data
       const dataYear = useMemo(() => {
@@ -169,8 +195,25 @@
         return raceData.filter(d => selectedRegions.includes(d.Region));
       }, [raceData, selectedRegions]);
       
-      // Get all unique teams and races from filtered data
-      const allTeams = useMemo(() => [...new Set(filteredRaceData.map(d => d.Team))].sort(), [filteredRaceData]);
+      // Get all unique teams (filtered by region and course)
+      const allTeams = useMemo(() => {
+        let data = filteredRaceData;
+        if (courseFilter !== 'all') {
+          data = data.filter(d => getCourse(d.Race) === courseFilter);
+        }
+        return [...new Set(data.map(d => d.Team))].sort();
+      }, [filteredRaceData, courseFilter]);
+
+      // Reset selected teams if they become invalid
+      useEffect(() => {
+        if (selectedTeams.length > 0) {
+          const validTeams = selectedTeams.filter(t => allTeams.includes(t));
+          if (validTeams.length !== selectedTeams.length) {
+            setSelectedTeams(validTeams);
+          }
+        }
+      }, [allTeams]);
+
       const allRaces = useMemo(() => {
         const races = [...new Set(filteredRaceData.map(d => d.Race))];
         return races.sort((a, b) => {
@@ -178,18 +221,6 @@
           const numB = parseInt(b.match(/\d+/)?.[0] || 0);
           return numA - numB;
         });
-      }, [filteredRaceData]);
-
-      // Extract course name from race (e.g., "Region 5: Race 3 - Beaver" → "Beaver")
-      const getCourse = (raceName) => {
-        const parts = raceName.split(' - ');
-        return parts.length > 1 ? parts[parts.length - 1] : raceName;
-      };
-
-      // Get all unique courses
-      const allCourses = useMemo(() => {
-        const courses = [...new Set(filteredRaceData.map(d => getCourse(d.Race)))];
-        return courses.sort();
       }, [filteredRaceData]);
 
       // Filter races by selected course
