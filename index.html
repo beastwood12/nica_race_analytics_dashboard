@@ -224,6 +224,24 @@
         return null;
       };
 
+      // Format split time between laps (current - previous)
+      const formatSplit = (currentLap, previousLap) => {
+        const current = parseTimeToSeconds(currentLap);
+        const previous = parseTimeToSeconds(previousLap);
+        if (current === null || previous === null) return null;
+        
+        const diff = current - previous;
+        const sign = diff >= 0 ? '+' : '-';
+        const absDiff = Math.abs(diff);
+        const mins = Math.floor(absDiff / 60);
+        const secs = Math.floor(absDiff % 60);
+        
+        if (mins > 0) {
+          return `${sign}${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+        return `${sign}${secs}s`;
+      };
+
       // Generate race analysis
       const generateRaceAnalysis = (race, idx, allRaces) => {
         const placement = parseInt(race.Placement);
@@ -1184,23 +1202,33 @@
                                 </div>
                               </div>
                               
-                              {/* Lap Times */}
+                              {/* Lap Times with Splits */}
                               <div className="space-y-1">
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-gray-600">Lap 1</span>
-                                  <span className="font-medium text-gray-900">{race.LAP1 || '-'}</span>
+                                <div className="flex text-sm">
+                                  <span className="text-gray-600 w-12">Lap 1</span>
+                                  <span className="font-medium text-gray-900 flex-1 text-right">{race.LAP1 || '-'}</span>
+                                  <span className="w-16"></span>
                                 </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-gray-600">Lap 2</span>
-                                  <span className="font-medium text-gray-900">{race.LAP2 || '-'}</span>
+                                <div className="flex text-sm">
+                                  <span className="text-gray-600 w-12">Lap 2</span>
+                                  <span className="font-medium text-gray-900 flex-1 text-right">{race.LAP2 || '-'}</span>
+                                  <span className={`w-16 text-right text-xs ${formatSplit(race.LAP2, race.LAP1)?.startsWith('+') ? 'text-red-500' : 'text-green-600'}`}>
+                                    {formatSplit(race.LAP2, race.LAP1) || ''}
+                                  </span>
                                 </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-gray-600">Lap 3</span>
-                                  <span className="font-medium text-gray-900">{race.LAP3 || '-'}</span>
+                                <div className="flex text-sm">
+                                  <span className="text-gray-600 w-12">Lap 3</span>
+                                  <span className="font-medium text-gray-900 flex-1 text-right">{race.LAP3 || '-'}</span>
+                                  <span className={`w-16 text-right text-xs ${formatSplit(race.LAP3, race.LAP2)?.startsWith('+') ? 'text-red-500' : 'text-green-600'}`}>
+                                    {formatSplit(race.LAP3, race.LAP2) || ''}
+                                  </span>
                                 </div>
-                                <div className="flex justify-between text-sm">
-                                  <span className="text-gray-600">Lap 4</span>
-                                  <span className="font-medium text-gray-900">{race.LAP4 || '-'}</span>
+                                <div className="flex text-sm">
+                                  <span className="text-gray-600 w-12">Lap 4</span>
+                                  <span className="font-medium text-gray-900 flex-1 text-right">{race.LAP4 || '-'}</span>
+                                  <span className={`w-16 text-right text-xs ${formatSplit(race.LAP4, race.LAP3)?.startsWith('+') ? 'text-red-500' : 'text-green-600'}`}>
+                                    {formatSplit(race.LAP4, race.LAP3) || ''}
+                                  </span>
                                 </div>
                               </div>
                               
