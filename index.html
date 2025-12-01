@@ -94,6 +94,9 @@
       const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
       const teamDropdownRef = useRef(null);
       
+      // Rider dropdown ref
+      const riderDropdownRef = useRef(null);
+      
       // Collapsible sections state
       const [sectionsOpen, setSectionsOpen] = useState({
         teamComparison: true,
@@ -108,7 +111,7 @@
       const leaderboardTableRef = useRef(null);
       const highlightedRowRef = useRef(null);
       
-      // Close region dropdown when clicking outside
+      // Close dropdowns when clicking outside
       useEffect(() => {
         const handleClickOutside = (event) => {
           if (regionDropdownRef.current && !regionDropdownRef.current.contains(event.target)) {
@@ -116,6 +119,9 @@
           }
           if (teamDropdownRef.current && !teamDropdownRef.current.contains(event.target)) {
             setTeamDropdownOpen(false);
+          }
+          if (riderDropdownRef.current && !riderDropdownRef.current.contains(event.target)) {
+            setShowDropdown(false);
           }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -152,15 +158,9 @@
         return [...new Set(raceData.map(d => d["Race Category"]))].sort();
       }, [raceData]);
 
-      // Extract course name from race (e.g., "Region 5: Race 3 - Beaver" → "Beaver")
-      const getCourse = (raceName) => {
-        const parts = raceName.split(' - ');
-        return parts.length > 1 ? parts[parts.length - 1] : raceName;
-      };
-
       // Get all unique courses (from all data)
       const allCourses = useMemo(() => {
-        const courses = [...new Set(raceData.map(d => getCourse(d.Race)))];
+        const courses = [...new Set(raceData.map(d => d["Race Course"]))];
         return courses.sort();
       }, [raceData]);
       
@@ -168,7 +168,7 @@
       const allRegions = useMemo(() => {
         let data = raceData;
         if (courseFilter !== 'all') {
-          data = data.filter(d => getCourse(d.Race) === courseFilter);
+          data = data.filter(d => d["Race Course"] === courseFilter);
         }
         return [...new Set(data.map(d => d.Region))].sort((a, b) => a - b);
       }, [raceData, courseFilter]);
@@ -199,7 +199,7 @@
       const allTeams = useMemo(() => {
         let data = filteredRaceData;
         if (courseFilter !== 'all') {
-          data = data.filter(d => getCourse(d.Race) === courseFilter);
+          data = data.filter(d => d["Race Course"] === courseFilter);
         }
         return [...new Set(data.map(d => d.Team))].sort();
       }, [filteredRaceData, courseFilter]);
@@ -226,8 +226,14 @@
       // Filter races by selected course
       const filteredRacesByCourse = useMemo(() => {
         if (courseFilter === 'all') return allRaces;
-        return allRaces.filter(race => getCourse(race) === courseFilter);
-      }, [allRaces, courseFilter]);
+        // Get races from data entries that match the course
+        const racesForCourse = [...new Set(
+          filteredRaceData
+            .filter(d => d["Race Course"] === courseFilter)
+            .map(d => d.Race)
+        )];
+        return allRaces.filter(race => racesForCourse.includes(race));
+      }, [allRaces, filteredRaceData, courseFilter]);
 
       // Get unique riders with team info from filtered data (O(n) using Map)
       const riderWithTeam = useMemo(() => {
@@ -401,7 +407,7 @@
         
         // Apply course filter
         if (courseFilter !== 'all') {
-          teamData = teamData.filter(d => getCourse(d.Race) === courseFilter);
+          teamData = teamData.filter(d => d["Race Course"] === courseFilter);
         }
         
         // Apply race filter
@@ -562,7 +568,7 @@
         
         // Apply course filter
         if (courseFilter !== 'all') {
-          data = data.filter(d => getCourse(d.Race) === courseFilter);
+          data = data.filter(d => d["Race Course"] === courseFilter);
         }
         
         // Apply global race filter
@@ -789,6 +795,17 @@
                       
                       {teamDropdownOpen && (
                         <div className="absolute z-30 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 py-2 max-h-64 overflow-y-auto">
+                          <label 
+                            className="flex items-center px-3 py-2 hover:bg-orange-50 cursor-pointer border-b border-gray-200"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedTeams.length === 0}
+                              onChange={() => setSelectedTeams([])}
+                              className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
+                            />
+                            <span className="ml-2 text-gray-700 text-sm font-medium">All Teams</span>
+                          </label>
                           {allTeams.map(team => (
                             <label 
                               key={team}
@@ -811,15 +828,6 @@
                               </span>
                             </label>
                           ))}
-                          <div className="border-t border-gray-200 mt-2 pt-2 px-3">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.preventDefault(); setSelectedTeams([]); }}
-                              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
-                            >
-                              Reset (Show All)
-                            </button>
-                          </div>
                         </div>
                       )}
                     </div>
@@ -1013,7 +1021,7 @@
                               className={`${isSearched ? 'bg-yellow-200 font-bold' : isNebo ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
                             >
                               <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                                {entry.rank <= 3 ? ['🥇','🥈','🥉'][entry.rank-1] : ''} #{entry.rank}
+                                {entry.rank <= 5 ? ['🥇','🥈','🥉','🏅','🏅'][entry.rank-1] : ''} #{entry.rank}
                               </td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Name}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Team} {isNebo && '🐐'}</td>
@@ -1166,7 +1174,7 @@
               <div className="bg-white rounded-lg shadow p-4 mb-4">
                 <h2 className="text-lg font-bold mb-3 text-gray-800">Select a Rider</h2>
                 
-                <div className="relative">
+                <div className="relative" ref={riderDropdownRef}>
                   <div className="relative">
                     <input
                       type="text"
@@ -1233,7 +1241,7 @@
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg">
                         <div className="text-sm text-gray-600 mb-1">Best Placement</div>
                         <div className="text-2xl font-bold text-blue-700">
-                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : `#${bestPlacement}`}
+                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : bestPlacement === 4 ? '🏅 4th' : bestPlacement === 5 ? '🏅 5th' : `#${bestPlacement}`}
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg">
@@ -1277,7 +1285,7 @@
                               <div>
                                 <div className="text-xs text-gray-600 mb-1">Placement</div>
                                 <div className="text-3xl font-bold text-gray-900">
-                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : ''}#{placement}
+                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : placement === 4 ? '🏅' : placement === 5 ? '🏅' : ''}#{placement}
                                 </div>
                               </div>
                               
