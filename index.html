@@ -94,13 +94,11 @@
       const [teamDropdownOpen, setTeamDropdownOpen] = useState(false);
       const teamDropdownRef = useRef(null);
       
-      // Rider dropdown ref
-      const riderDropdownRef = useRef(null);
-      
       // Collapsible sections state
       const [sectionsOpen, setSectionsOpen] = useState({
         teamComparison: true,
         categoryLeaderboard: false,
+        stateQualification: false,
         genderBalance: false,
         programFunnel: false
       });
@@ -111,7 +109,13 @@
       const leaderboardTableRef = useRef(null);
       const highlightedRowRef = useRef(null);
       
-      // Close dropdowns when clicking outside
+      // State Qualification Points state
+      const [qualificationCategory, setQualificationCategory] = useState('');
+      const [qualificationSearch, setQualificationSearch] = useState('');
+      const qualificationTableRef = useRef(null);
+      const qualificationHighlightedRowRef = useRef(null);
+      
+      // Close region dropdown when clicking outside
       useEffect(() => {
         const handleClickOutside = (event) => {
           if (regionDropdownRef.current && !regionDropdownRef.current.contains(event.target)) {
@@ -119,9 +123,6 @@
           }
           if (teamDropdownRef.current && !teamDropdownRef.current.contains(event.target)) {
             setTeamDropdownOpen(false);
-          }
-          if (riderDropdownRef.current && !riderDropdownRef.current.contains(event.target)) {
-            setShowDropdown(false);
           }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -603,6 +604,107 @@
         return name.toLowerCase().includes(leaderboardSearch.toLowerCase());
       };
       
+      // Get HS categories (Freshman, JV, Varsity, SLR) for qualification
+      const hsCategories = useMemo(() => {
+        return allCategories.filter(cat => 
+          cat.includes('Freshman') || cat.includes('JV') || cat.includes('Varsity') || cat.includes('SLR')
+        );
+      }, [allCategories]);
+      
+      // State Qualification Points data computation
+      const qualificationData = useMemo(() => {
+        if (!qualificationCategory) return [];
+        
+        // Get all entries for the selected category across all selected regions
+        let data = filteredRaceData.filter(d => d["Race Category"] === qualificationCategory);
+        
+        // Group by rider name
+        const riderMap = new Map();
+        
+        data.forEach(entry => {
+          const name = entry.Name;
+          if (!riderMap.has(name)) {
+            riderMap.set(name, {
+              name: name,
+              team: entry.Team,
+              region: entry.Region,
+              races: { 1: 0, 2: 0, 3: 0, 4: 0 }
+            });
+          }
+          const rider = riderMap.get(name);
+          const raceNum = entry.RaceNum;
+          const points = entry.Points ? parseInt(entry.Points) : 0;
+          // Keep the highest points if multiple entries for same race (shouldn't happen, but safety)
+          if (raceNum >= 1 && raceNum <= 4) {
+            rider.races[raceNum] = Math.max(rider.races[raceNum], points);
+          }
+        });
+        
+        // Calculate totals with drop lowest
+        const results = [];
+        riderMap.forEach((rider, name) => {
+          const racePoints = [rider.races[1], rider.races[2], rider.races[3], rider.races[4]];
+          const minPoints = Math.min(...racePoints);
+          const minIndex = racePoints.indexOf(minPoints);
+          const total = racePoints.reduce((sum, pts) => sum + pts, 0) - minPoints;
+          
+          results.push({
+            name: rider.name,
+            team: rider.team,
+            region: rider.region,
+            r1: rider.races[1],
+            r2: rider.races[2],
+            r3: rider.races[3],
+            r4: rider.races[4],
+            droppedRace: minIndex + 1, // 1-indexed
+            total: total
+          });
+        });
+        
+        // Sort by total points descending
+        results.sort((a, b) => b.total - a.total);
+        
+        // Assign ranks (before filtering)
+        results.forEach((r, idx) => {
+          r.rank = idx + 1;
+        });
+        
+        // Apply team filters (but preserve original rank)
+        let filtered = results;
+        if (showOnlyNeboGoats) {
+          filtered = results.filter(r => NEBO_GOATS_TEAMS.includes(r.team));
+        } else if (selectedTeams.length > 0) {
+          filtered = results.filter(r => selectedTeams.includes(r.team));
+        }
+        
+        return filtered;
+      }, [qualificationCategory, filteredRaceData, showOnlyNeboGoats, selectedTeams]);
+      
+      // Find searched rider index for qualification table
+      const qualificationSearchedIndex = useMemo(() => {
+        if (!qualificationSearch || !qualificationData.length) return -1;
+        const searchLower = qualificationSearch.toLowerCase();
+        return qualificationData.findIndex(d => d.name.toLowerCase().includes(searchLower));
+      }, [qualificationSearch, qualificationData]);
+      
+      // Helper for qualification search matching
+      const matchesQualificationSearch = (name) => {
+        if (!qualificationSearch) return false;
+        return name.toLowerCase().includes(qualificationSearch.toLowerCase());
+      };
+      
+      // Auto-scroll for qualification table
+      useEffect(() => {
+        if (qualificationSearchedIndex >= 0 && qualificationHighlightedRowRef.current && qualificationTableRef.current && qualificationSearch.length >= 2) {
+          const container = qualificationTableRef.current;
+          const row = qualificationHighlightedRowRef.current;
+          const rowRect = row.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          const scrollTop = container.scrollTop + (rowRect.top - containerRect.top) - 50;
+          container.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' });
+        }
+      }, [qualificationSearchedIndex, qualificationSearch]);
+      
       // Auto-scroll to first match within table container (not page)
       useEffect(() => {
         if (searchedRiderIndex >= 0 && highlightedRowRef.current && leaderboardTableRef.current && leaderboardSearch.length >= 2) {
@@ -795,17 +897,6 @@
                       
                       {teamDropdownOpen && (
                         <div className="absolute z-30 mt-1 w-full bg-white rounded-lg shadow-lg border border-gray-200 py-2 max-h-64 overflow-y-auto">
-                          <label 
-                            className="flex items-center px-3 py-2 hover:bg-orange-50 cursor-pointer border-b border-gray-200"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedTeams.length === 0}
-                              onChange={() => setSelectedTeams([])}
-                              className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
-                            />
-                            <span className="ml-2 text-gray-700 text-sm font-medium">All Teams</span>
-                          </label>
                           {allTeams.map(team => (
                             <label 
                               key={team}
@@ -828,6 +919,15 @@
                               </span>
                             </label>
                           ))}
+                          <div className="border-t border-gray-200 mt-2 pt-2 px-3">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); setSelectedTeams([]); }}
+                              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                            >
+                              Reset (Show All)
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -909,30 +1009,26 @@
                         <th 
                           onClick={() => handleSort('totalRacers')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                          title="Number of unique riders on this team"
                         >
                           Racers {sortColumn === 'totalRacers' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('podiumFinishes')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                          title="Total top-5 finishes (1st-5th place). A racer with multiple podiums is counted each time."
                         >
                           Podiums {sortColumn === 'podiumFinishes' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('top25Count')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                          title="Total race finishes in top 25% of category. A racer with multiple top-25% finishes is counted each time."
                         >
-                          Top 25% Finishes {sortColumn === 'top25Count' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          Top 25% In Category {sortColumn === 'top25Count' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('avgGap')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                          title="Average time behind the category winner across all race finishes"
                         >
-                          Avg Gap To First {sortColumn === 'avgGap' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          Avg Gap To First In Category {sortColumn === 'avgGap' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                       </tr>
                     </thead>
@@ -1025,7 +1121,7 @@
                               className={`${isSearched ? 'bg-yellow-200 font-bold' : isNebo ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
                             >
                               <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                                {entry.rank <= 5 ? ['🥇','🥈','🥉','🏅','🏅'][entry.rank-1] : ''} #{entry.rank}
+                                {entry.rank <= 3 ? ['🥇','🥈','🥉'][entry.rank-1] : ''} #{entry.rank}
                               </td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Name}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Team} {isNebo && '🐐'}</td>
@@ -1050,6 +1146,105 @@
                 {!leaderboardCategory && (
                   <div className="text-center py-8 text-gray-500">
                     Please select a category to view the leaderboard.
+                  </div>
+                )}
+              </CollapsibleSection>
+
+              {/* State Qualification Points Section */}
+              <CollapsibleSection id="stateQualification" title="State Qualification Points" icon="🎫" isOpen={sectionsOpen.stateQualification} onToggle={toggleSection}>
+                <div className="mb-2 text-sm text-gray-600">
+                  Points standings for state championship qualification. Top 3 of 4 races count (lowest dropped).
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Category *</label>
+                    <select
+                      value={qualificationCategory}
+                      onChange={(e) => setQualificationCategory(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="">-- Choose Category --</option>
+                      {hsCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Find Rider</label>
+                    <input
+                      type="text"
+                      value={qualificationSearch}
+                      onChange={(e) => setQualificationSearch(e.target.value)}
+                      placeholder="Type rider name..."
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+                
+                {qualificationCategory && qualificationData.length > 0 && (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto" ref={qualificationTableRef}>
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                      <thead className="bg-orange-500 text-white sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-semibold">Rank</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold">Name</th>
+                          <th className="px-3 py-2 text-left text-xs font-semibold">Team</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold">R1</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold">R2</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold">R3</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold">R4</th>
+                          <th className="px-3 py-2 text-center text-xs font-semibold">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {qualificationData.map((entry, idx) => {
+                          const isSearched = matchesQualificationSearch(entry.name);
+                          const isFirstMatch = isSearched && idx === qualificationSearchedIndex;
+                          const isNebo = NEBO_GOATS_TEAMS.includes(entry.team);
+                          
+                          return (
+                            <tr 
+                              key={idx} 
+                              ref={isFirstMatch ? qualificationHighlightedRowRef : null}
+                              className={`${isSearched ? 'bg-yellow-200 font-bold' : isNebo ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <td className="px-3 py-2 whitespace-nowrap text-sm font-medium">
+                                #{entry.rank}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm">{entry.name}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm">{entry.team} {isNebo && '🐐'}</td>
+                              <td className={`px-3 py-2 whitespace-nowrap text-sm text-center ${entry.droppedRace === 1 ? 'text-gray-400 line-through' : ''}`}>
+                                {entry.r1}
+                              </td>
+                              <td className={`px-3 py-2 whitespace-nowrap text-sm text-center ${entry.droppedRace === 2 ? 'text-gray-400 line-through' : ''}`}>
+                                {entry.r2}
+                              </td>
+                              <td className={`px-3 py-2 whitespace-nowrap text-sm text-center ${entry.droppedRace === 3 ? 'text-gray-400 line-through' : ''}`}>
+                                {entry.r3}
+                              </td>
+                              <td className={`px-3 py-2 whitespace-nowrap text-sm text-center ${entry.droppedRace === 4 ? 'text-gray-400 line-through' : ''}`}>
+                                {entry.r4}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm text-center font-bold text-orange-600">
+                                {entry.total}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                
+                {qualificationCategory && qualificationData.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    No qualification data found for this category.
+                  </div>
+                )}
+                
+                {!qualificationCategory && (
+                  <div className="text-center py-8 text-gray-500">
+                    Please select a category to view qualification standings.
                   </div>
                 )}
               </CollapsibleSection>
@@ -1178,7 +1373,7 @@
               <div className="bg-white rounded-lg shadow p-4 mb-4">
                 <h2 className="text-lg font-bold mb-3 text-gray-800">Select a Rider</h2>
                 
-                <div className="relative" ref={riderDropdownRef}>
+                <div className="relative">
                   <div className="relative">
                     <input
                       type="text"
@@ -1245,7 +1440,7 @@
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg">
                         <div className="text-sm text-gray-600 mb-1">Best Placement</div>
                         <div className="text-2xl font-bold text-blue-700">
-                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : bestPlacement === 4 ? '🏅 4th' : bestPlacement === 5 ? '🏅 5th' : `#${bestPlacement}`}
+                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : `#${bestPlacement}`}
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg">
@@ -1289,7 +1484,7 @@
                               <div>
                                 <div className="text-xs text-gray-600 mb-1">Placement</div>
                                 <div className="text-3xl font-bold text-gray-900">
-                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : placement === 4 ? '🏅' : placement === 5 ? '🏅' : ''}#{placement}
+                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : ''}#{placement}
                                 </div>
                               </div>
                               
