@@ -909,26 +909,30 @@
                         <th 
                           onClick={() => handleSort('totalRacers')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                          title="Number of unique riders on this team"
                         >
                           Racers {sortColumn === 'totalRacers' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('podiumFinishes')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                          title="Total top-5 finishes (1st-5th place). A racer with multiple podiums is counted each time."
                         >
                           Podiums {sortColumn === 'podiumFinishes' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('top25Count')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                          title="Total race finishes in top 25% of category. A racer with multiple top-25% finishes is counted each time."
                         >
-                          Top 25% In Category {sortColumn === 'top25Count' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          Top 25% Finishes {sortColumn === 'top25Count' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                         <th 
                           onClick={() => handleSort('avgGap')}
                           className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
+                          title="Average time behind the category winner across all race finishes"
                         >
-                          Avg Gap To First In Category {sortColumn === 'avgGap' && (sortDirection === 'asc' ? '↑' : '↓')}
+                          Avg Gap To First {sortColumn === 'avgGap' && (sortDirection === 'asc' ? '↑' : '↓')}
                         </th>
                       </tr>
                     </thead>
