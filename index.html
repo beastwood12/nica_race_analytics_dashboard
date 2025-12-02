@@ -795,6 +795,23 @@
                     
                     {regionDropdownOpen && (
                       <div className="absolute z-30 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[160px]">
+                        <label 
+                          className="flex items-center px-4 py-2 hover:bg-orange-50 cursor-pointer border-b border-gray-200 mb-1"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedRegions.length === allRegions.length}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRegions([...allRegions]);
+                              } else {
+                                setSelectedRegions([]);
+                              }
+                            }}
+                            className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
+                          />
+                          <span className="ml-2 text-gray-700 text-sm font-medium">All Regions</span>
+                        </label>
                         {allRegions.map(region => (
                           <label 
                             key={region}
