@@ -247,18 +247,30 @@
         return allRaces.filter(race => racesForCourse.includes(race));
       }, [allRaces, filteredRaceData, courseFilter]);
 
-      // Get unique riders with team info from filtered data (O(n) using Map)
+      // Pre-compute ALL rider race counts from full dataset (runs once on load)
+      const allRiderRaceCounts = useMemo(() => {
+        const counts = new Map();
+        raceData.forEach(d => {
+          counts.set(d.Name, (counts.get(d.Name) || 0) + 1);
+        });
+        return counts;
+      }, [raceData]);
+
+      // Get unique riders with team info from filtered data, but show FULL race counts
       const riderWithTeam = useMemo(() => {
         const riderMap = new Map();
         filteredRaceData.forEach(d => {
           if (!riderMap.has(d.Name)) {
-            riderMap.set(d.Name, { name: d.Name, team: d.Team, races: 1 });
-          } else {
-            riderMap.get(d.Name).races++;
+            // Use full race count from allRiderRaceCounts
+            riderMap.set(d.Name, { 
+              name: d.Name, 
+              team: d.Team, 
+              races: allRiderRaceCounts.get(d.Name) || 1 
+            });
           }
         });
         return [...riderMap.values()].sort((a, b) => a.name.localeCompare(b.name));
-      }, [filteredRaceData]);
+      }, [filteredRaceData, allRiderRaceCounts]);
 
       // Filter riders based on search
       const filteredRiders = riderWithTeam.filter(rider => 
@@ -266,8 +278,8 @@
         rider.team.toLowerCase().includes(searchTerm.toLowerCase())
       );
 
-      // Get selected rider data
-      const riderRaces = filteredRaceData.filter(d => d.Name === selectedRider).sort((a, b) => a.RaceNum - b.RaceNum);
+      // Get selected rider data - use FULL raceData to show ALL races regardless of region filter
+      const riderRaces = raceData.filter(d => d.Name === selectedRider).sort((a, b) => a.RaceNum - b.RaceNum);
       const riderTeam = riderRaces[0]?.Team || '';
       const totalRaces = riderRaces.length;
       const bestPlacement = riderRaces.length > 0 ? Math.min(...riderRaces.map(r => parseInt(r.Placement))) : 0;
@@ -332,7 +344,7 @@
 
         // Calculate gap to next rider ahead (if not 1st place)
         if (placement > 1 && race.TotalSeconds) {
-          const nextRider = filteredRaceData.find(d => 
+          const nextRider = raceData.find(d => 
             d.Race === race.Race && 
             d["Race Category"] === race["Race Category"] && 
             parseInt(d.Placement) === placement - 1 &&
