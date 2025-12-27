@@ -35,6 +35,11 @@
       return category.includes('Girls') ? 'Female' : 'Male';
     };
 
+    // Helper function to get region display name
+    const getRegionDisplayName = (region) => {
+      return region === 7 ? 'State Championship' : `Region ${region}`;
+    };
+
     // Helper function for ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
     const getOrdinal = (n) => {
       const s = ['th', 'st', 'nd', 'rd'];
@@ -792,7 +797,9 @@
                           ? 'All Regions' 
                           : selectedRegions.length === allRegions.length 
                             ? 'All Regions'
-                            : `Region${selectedRegions.length > 1 ? 's' : ''} ${selectedRegions.sort((a,b) => a-b).join(', ')}`}
+                            : selectedRegions.length === 1
+                              ? getRegionDisplayName(selectedRegions[0])
+                              : `${selectedRegions.length} regions selected`}
                       </span>
                       <svg className={`w-4 h-4 transition-transform ${regionDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -800,7 +807,7 @@
                     </button>
                     
                     {regionDropdownOpen && (
-                      <div className="absolute z-30 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[160px]">
+                      <div className="absolute z-30 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[200px]">
                         <label 
                           className="flex items-center px-4 py-2 hover:bg-orange-50 cursor-pointer border-b border-gray-200 mb-1"
                         >
@@ -835,16 +842,24 @@
                               }}
                               className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
                             />
-                            <span className="ml-2 text-gray-700 text-sm">Region {region}</span>
+                            <span className="ml-2 text-gray-700 text-sm">{getRegionDisplayName(region)}</span>
                           </label>
                         ))}
-                        <div className="border-t border-gray-200 mt-2 pt-2 px-4">
+                        <div className="border-t border-gray-200 mt-2 pt-2 px-4 flex gap-2">
                           <button
                             type="button"
                             onClick={(e) => { e.preventDefault(); setSelectedRegions([5]); }}
                             className="text-xs text-orange-600 hover:text-orange-700 font-medium"
                           >
-                            Reset to Region 5
+                            Region 5
+                          </button>
+                          <span className="text-gray-300">|</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setSelectedRegions([7]); }}
+                            className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+                          >
+                            State Only
                           </button>
                         </div>
                       </div>
@@ -1148,7 +1163,7 @@
                               </td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Name}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Team} {isNebo && '🐐'}</td>
-                              <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Region}</td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm">{getRegionDisplayName(entry.Region)}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">{entry.Race}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm">#{entry.Placement}</td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm font-semibold">{entry["Total Time"]}</td>
