@@ -47,6 +47,46 @@
       return n + (s[(v - 20) % 10] || s[v] || s[0]);
     };
 
+    // Safe placement parser - handles DNF ('*') and other non-numeric values
+    const safePlacement = (p) => { const n = parseInt(p); return isNaN(n) ? Infinity : n; };
+
+    // Error boundary to catch rendering errors and show fallback UI
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      componentDidCatch(error, errorInfo) {
+        console.error('Dashboard error:', error, errorInfo);
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+              <div className="text-center max-w-lg px-4">
+                <div className="text-2xl font-bold text-red-600 mb-2">Something went wrong</div>
+                <div className="text-gray-600 mb-4">The dashboard encountered an error while rendering.</div>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-left">
+                  <div className="text-sm font-mono text-red-800 break-all">{this.state.error?.message || 'Unknown error'}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => this.setState({ hasError: false, error: null })}
+                  className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-semibold"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
     // Collapsible Section component - defined outside App to prevent re-creation on render
     const CollapsibleSection = ({ id, title, icon, isOpen, onToggle, children }) => (
       <div className="bg-white rounded-lg shadow mb-4 overflow-hidden">
@@ -282,8 +322,8 @@
       const riderRaces = raceData.filter(d => d.Name === selectedRider).sort((a, b) => a.RaceNum - b.RaceNum);
       const riderTeam = riderRaces[0]?.Team || '';
       const totalRaces = riderRaces.length;
-      const bestPlacement = riderRaces.length > 0 ? Math.min(...riderRaces.map(r => parseInt(r.Placement))) : 0;
-      const podiumCount = riderRaces.filter(r => parseInt(r.Placement) <= 5).length;
+      const bestPlacement = riderRaces.length > 0 ? Math.min(...riderRaces.map(r => safePlacement(r.Placement))) : 0;
+      const podiumCount = riderRaces.filter(r => safePlacement(r.Placement) <= 5).length;
 
       // Format time helper
       const formatTime = (seconds) => {
@@ -324,11 +364,14 @@
 
       // Generate race analysis
       const generateRaceAnalysis = (race, idx, allRaces) => {
-        const placement = parseInt(race.Placement);
+        const placement = safePlacement(race.Placement);
         let analysis = '';
         let focus = '';
 
-        if (placement === 1) {
+        if (placement === Infinity) {
+          analysis = `DNF — Did not finish this race.`;
+          focus = `Every rider has tough days. Shake it off and come back stronger next time!`;
+        } else if (placement === 1) {
           analysis = `🥇 Victory! You dominated this race with a first-place finish.`;
           focus = `Keep doing what you're doing—your training is paying off!`;
         } else if (placement <= 5) {
@@ -342,8 +385,8 @@
           focus = `Every race is progress. Focus on building endurance and maintaining consistent lap times.`;
         }
 
-        // Calculate gap to next rider ahead (if not 1st place)
-        if (placement > 1 && race.TotalSeconds) {
+        // Calculate gap to next rider ahead (if not 1st place and not DNF)
+        if (placement > 1 && placement !== Infinity && race.TotalSeconds) {
           const nextRider = raceData.find(d => 
             d.Race === race.Race && 
             d["Race Category"] === race["Race Category"] && 
@@ -367,8 +410,8 @@
           }
         }
 
-        // Compare to previous race in same category
-        if (idx > 0 && race.TotalSeconds) {
+        // Compare to previous race in same category (skip if DNF)
+        if (idx > 0 && race.TotalSeconds && placement !== Infinity) {
           const prevRaceSameCategory = allRaces
             .slice(0, idx)
             .reverse()
@@ -390,19 +433,21 @@
           }
         }
 
-        // Compare placement to previous race
-        if (idx > 0 && allRaces[idx - 1]) {
-          const prevPlacement = parseInt(allRaces[idx - 1].Placement);
-          const improvementOrDecline = prevPlacement - placement;
-          
-          if (improvementOrDecline > 5) {
-            analysis += ` Huge improvement from last race (up ${improvementOrDecline} places)!`;
-          } else if (improvementOrDecline > 0) {
-            analysis += ` Nice progress from last race (up ${improvementOrDecline} ${improvementOrDecline === 1 ? 'place' : 'places'}).`;
+        // Compare placement to previous race (skip if either is DNF)
+        if (idx > 0 && allRaces[idx - 1] && placement !== Infinity) {
+          const prevPlacement = safePlacement(allRaces[idx - 1].Placement);
+          if (prevPlacement !== Infinity) {
+            const improvementOrDecline = prevPlacement - placement;
+            
+            if (improvementOrDecline > 5) {
+              analysis += ` Huge improvement from last race (up ${improvementOrDecline} places)!`;
+            } else if (improvementOrDecline > 0) {
+              analysis += ` Nice progress from last race (up ${improvementOrDecline} ${improvementOrDecline === 1 ? 'place' : 'places'}).`;
+            }
           }
         }
 
-        // Lap consistency analysis
+        // Lap consistency analysis (skip if DNF)
         const lap1 = parseTimeToSeconds(race.LAP1);
         const lap2 = parseTimeToSeconds(race.LAP2);
         let lapDifference = null;
@@ -411,7 +456,7 @@
           lapDifference = lap2 - lap1;
         }
         
-        if (lapDifference !== null) {
+        if (lapDifference !== null && placement !== Infinity) {
           if (lapDifference > 120) {
             const mins = Math.floor(lapDifference / 60);
             const secs = Math.floor(lapDifference % 60);
@@ -440,7 +485,7 @@
         }
 
         const uniqueRiders = new Set(teamData.map(d => d.Name)).size;
-        const podiumFinishes = teamData.filter(d => parseInt(d.Placement) >= 1 && parseInt(d.Placement) <= 5).length;
+        const podiumFinishes = teamData.filter(d => safePlacement(d.Placement) >= 1 && safePlacement(d.Placement) <= 5).length;
         
         // Calculate top 25% finishers
         let top25Count = 0;
@@ -457,7 +502,7 @@
           }
           
           const threshold = Math.ceil(categoryCounts[key] * 0.25);
-          if (parseInt(entry.Placement) <= threshold) {
+          if (safePlacement(entry.Placement) <= threshold) {
             top25Count++;
           }
         });
@@ -467,7 +512,7 @@
         let gapCount = 0;
         
         teamData.forEach(entry => {
-          if (entry.TotalSeconds && parseInt(entry.Placement) > 1) {
+          if (entry.TotalSeconds && safePlacement(entry.Placement) > 1) {
             const winnerData = filteredRaceData.find(d => 
               d.Race === entry.Race && 
               d["Race Category"] === entry["Race Category"] && 
@@ -656,7 +701,7 @@
           }
           const rider = riderMap.get(name);
           const raceNum = entry.RaceNum;
-          const points = entry.Points ? parseInt(entry.Points) : 0;
+          const points = entry.Points ? Math.round(Number(entry.Points)) : 0;
           // Keep the highest points if multiple entries for same race (shouldn't happen, but safety)
           if (raceNum >= 1 && raceNum <= 4) {
             rider.races[raceNum] = Math.max(rider.races[raceNum], points);
@@ -752,17 +797,6 @@
           setSortColumn(column);
           setSortDirection('desc');
         }
-      };
-
-      const handleTeamSelect = (e) => {
-        const options = e.target.options;
-        const selected = [];
-        for (let i = 0; i < options.length; i++) {
-          if (options[i].selected) {
-            selected.push(options[i].value);
-          }
-        }
-        setSelectedTeams(selected);
       };
 
       if (loading) {
@@ -1490,7 +1524,7 @@
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg">
                         <div className="text-sm text-gray-600 mb-1">Best Placement</div>
                         <div className="text-2xl font-bold text-blue-700">
-                          {bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : `#${bestPlacement}`}
+                          {bestPlacement === Infinity ? 'DNF' : bestPlacement === 1 ? '🥇 1st' : bestPlacement === 2 ? '🥈 2nd' : bestPlacement === 3 ? '🥉 3rd' : `#${bestPlacement}`}
                         </div>
                       </div>
                       <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg">
@@ -1512,7 +1546,7 @@
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       {riderRaces.map((race, idx) => {
-                        const placement = parseInt(race.Placement);
+                        const placement = safePlacement(race.Placement);
                         const { analysis, focus } = generateRaceAnalysis(race, idx, riderRaces);
                         
                         return (
@@ -1534,7 +1568,7 @@
                               <div>
                                 <div className="text-xs text-gray-600 mb-1">Placement</div>
                                 <div className="text-3xl font-bold text-gray-900">
-                                  {placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : ''}#{placement}
+                                  {placement === Infinity ? 'DNF' : <>{placement === 1 ? '🥇' : placement === 2 ? '🥈' : placement === 3 ? '🥉' : ''}#{placement}</>}
                                 </div>
                               </div>
                               
@@ -1572,7 +1606,7 @@
                               <div className="pt-2 border-t border-gray-200">
                                 <div className="text-xs text-gray-600 mb-1">Total Time</div>
                                 <div className="text-lg font-bold text-gray-900">
-                                  {formatTime(race.TotalSeconds)}
+                                  {placement === Infinity ? 'DNF' : race.TotalSeconds ? formatTime(race.TotalSeconds) : 'N/A'}
                                 </div>
                               </div>
                               
@@ -1601,7 +1635,7 @@
       );
     }
 
-    ReactDOM.render(<App />, document.getElementById('root'));
+    ReactDOM.render(<ErrorBoundary><App /></ErrorBoundary>, document.getElementById('root'));
   </script>
 </body>
 </html>
